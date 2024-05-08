@@ -51,7 +51,7 @@ impl TransactionTestContext {
             chain_id: self.chain_id,
             nonce,
             gas_limit: 210_000,
-            to: TxKind::Call(Address::ZERO),
+            to: TxKind::Call(Address::random()),
             max_priority_fee_per_gas: 20e9 as u128,
             max_fee_per_gas: 20e9 as u128,
             value: U256::from(1),
