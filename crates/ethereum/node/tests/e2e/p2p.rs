@@ -24,20 +24,19 @@ async fn can_sync() -> eyre::Result<()> {
     let mut nodes = TestNetworkBuilder::<EthereumNode>::new(2, chain_spec, exec).build().await?;
 
     let mut first_node = nodes.pop().unwrap();
-    let mut second_node = nodes.pop().unwrap();
+    let second_node = nodes.pop().unwrap();
 
-    let raw_tx = first_node.wallets.first().unwrap().eip1559().await;
+    // start broadcasting tx into the pool
+    first_node.inject_pending_stream();
 
     // make the first node advance
-    let (payload, _, tx_hash) = first_node.advance(vec![], eth_payload_attributes, raw_tx).await?;
-
-    let block_hash = payload.block().hash();
+    let (_, _, block_hash) = first_node.advance(vec![], eth_payload_attributes).await?;
 
     // only send forkchoice update to second node
     second_node.engine_api.update_forkchoice(block_hash, block_hash).await?;
 
     // expect second node advanced via p2p gossip
-    second_node.assert_new_block(tx_hash, block_hash, 1).await?;
+    second_node.assert_new_block(block_hash, 1).await?;
 
     Ok(())
 }

@@ -10,17 +10,21 @@ const TEST_MNEMONIC: &str = "test test test test test test test test test test t
 #[derive(Clone, Debug)]
 pub struct WalletGenerator {
     chain_id: u64,
-    amount: usize,
     phrase: String,
     derivation_path: String,
 }
 
+impl Default for WalletGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WalletGenerator {
     /// Creates a new wallet generator defaulting to MAINNET specs
-    pub fn new(amount: usize) -> Self {
+    pub fn new() -> Self {
         Self {
             chain_id: 1,
-            amount,
             phrase: TEST_MNEMONIC.to_string(),
             derivation_path: "m/44'/60'/0'/0/".to_string(),
         }
@@ -49,28 +53,32 @@ impl WalletGenerator {
         self
     }
 
-    fn get_derivation_path(&self) -> &str {
-        &self.derivation_path
+    fn get_derivation_path(&self, index: usize) -> String {
+        format!("m/44'/60'/0'/0/{}", index)
     }
 }
 
 impl WalletGenerator {
-    /// Generates wallets from a previously set phrase, chain id and amount
-    pub fn gen(&self) -> Vec<Wallet> {
+    /// Generates a single wallet from a previously set phrase and chain id
+    pub fn gen(&self) -> Wallet {
+        self.generate_wallet(0)
+    }
+
+    /// Generates multiple wallets from a previously set phrase, chain id and amount
+    pub fn gen_many(&self, amount: usize) -> Vec<Wallet> {
+        (0..amount).map(|idx| self.generate_wallet(idx)).collect()
+    }
+
+    /// Helper function to generate a wallet for a given index
+    fn generate_wallet(&self, index: usize) -> Wallet {
         let builder = MnemonicBuilder::<English>::default().phrase(self.phrase.as_str());
 
         // use the derivation path
-        let derivation_path = self.get_derivation_path();
+        let derivation_path = self.get_derivation_path(index);
 
-        let mut wallets = Vec::with_capacity(self.amount);
-        for idx in 0..self.amount {
-            let builder =
-                builder.clone().derivation_path(&format!("{derivation_path}{idx}")).unwrap();
-            let inner = builder.build().unwrap().with_chain_id(Some(self.chain_id));
-            let wallet = Wallet::new(inner, self.chain_id);
-            wallets.push(wallet)
-        }
-        wallets
+        let builder = builder.derivation_path(derivation_path).unwrap();
+        let inner = builder.build().unwrap().with_chain_id(Some(self.chain_id));
+        Wallet::new(inner, self.chain_id)
     }
 }
 /// Helper struct that wraps interaction to a local wallet and a transaction generator
@@ -78,14 +86,13 @@ impl WalletGenerator {
 pub struct Wallet {
     inner: LocalWallet,
     pub tx_gen: TransactionTestContext,
-    pub nonce: u64,
 }
 
 impl Wallet {
     /// Create a new wallet with a given chain id
     pub fn new(inner: LocalWallet, chain_id: u64) -> Self {
         let tx_gen = TransactionTestContext::new(chain_id, inner.clone());
-        Self { inner, tx_gen, nonce: 0 }
+        Self { inner, tx_gen }
     }
     /// Get the address of the wallet
     pub fn address(&self) -> String {
@@ -93,17 +100,17 @@ impl Wallet {
     }
 
     /// Get an EIP1559 transaction
-    pub async fn eip1559(&self) -> Bytes {
+    pub async fn eip1559(&mut self) -> Bytes {
         self.tx_gen.eip1559().await
     }
 
     /// Get an EIP4844 transaction
-    pub async fn eip4844(&self) -> Bytes {
+    pub async fn eip4844(&mut self) -> Bytes {
         self.tx_gen.eip4844().await.unwrap()
     }
     /// Get an optimism block info transaction
-    pub async fn optimism_block_info(&self, nonce: u64) -> Bytes {
-        self.tx_gen.optimism_block_info(nonce).await
+    pub async fn optimism_block_info(&mut self) -> Bytes {
+        self.tx_gen.optimism_block_info().await
     }
 }
 
@@ -114,6 +121,6 @@ impl Default for Wallet {
         let inner = builder.build().unwrap();
         let chain_id: ChainId = MAINNET.chain.into();
         let tx_gen = TransactionTestContext::new(chain_id, inner.clone());
-        Self { inner, tx_gen, nonce: 0 }
+        Self { inner, tx_gen }
     }
 }

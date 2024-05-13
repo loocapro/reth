@@ -10,13 +10,13 @@ use reth::{
 use reth_e2e_test_utils::TestNodeGenerator;
 use serde_json::{from_reader, to_string_pretty};
 use std::{
-    fs::{create_dir_all, File},
+    fs::{create_dir_all, remove_dir_all, File},
     io::{BufReader, Write},
     sync::Arc,
 };
 
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
-use reth_primitives::{fs::remove_dir_all, ChainSpecBuilder, Genesis, SealedBlock, MAINNET};
+use reth_primitives::{ChainSpecBuilder, Genesis, SealedBlock, MAINNET};
 
 use crate::utils::eth_payload_attributes;
 
@@ -125,8 +125,8 @@ impl BlockTestContext {
                     logs_bloom: block.header.logs_bloom,
                     prev_randao: block.header.mix_hash,
                     block_number: block.header.number,
-                    gas_limit: block.header.gas_limit.try_into().unwrap(),
-                    gas_used: block.header.gas_used.try_into().unwrap(),
+                    gas_limit: block.header.gas_limit,
+                    gas_used: block.header.gas_used,
                     timestamp: block.header.timestamp,
                     extra_data: block.header.extra_data.clone(),
                     base_fee_per_gas: block.header.base_fee_per_gas.unwrap().try_into().unwrap(),
@@ -135,8 +135,8 @@ impl BlockTestContext {
                 },
                 withdrawals: block.withdrawals.clone().unwrap_or_default().to_vec(),
             },
-            blob_gas_used: block.header.blob_gas_used.unwrap().try_into().unwrap(),
-            excess_blob_gas: block.header.excess_blob_gas.unwrap().try_into().unwrap(),
+            blob_gas_used: block.header.blob_gas_used.unwrap(),
+            excess_blob_gas: block.header.excess_blob_gas.unwrap(),
         }
     }
 }

@@ -1,18 +1,15 @@
 use crate::utils::optimism_payload_attributes;
 use reth::{primitives::BASE_MAINNET, tasks::TaskManager};
-use reth_e2e_test_utils::TestNetworkBuilder;
+use reth_e2e_test_utils::{wallet::WalletGenerator, TestNetworkBuilder};
 use reth_interfaces::blockchain_tree::error::BlockchainTreeError;
 use reth_node_optimism::OptimismNode;
-use reth_primitives::{ChainId, ChainSpecBuilder, Genesis};
+use reth_primitives::{ChainSpecBuilder, Genesis};
 use reth_rpc_types::engine::PayloadStatusEnum;
 use std::sync::Arc;
-use tokio::sync::Mutex;
-use tracing::info;
 
 #[tokio::test]
 async fn can_sync() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let chain_id: ChainId = BASE_MAINNET.chain.into();
 
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -26,37 +23,39 @@ async fn can_sync() -> eyre::Result<()> {
             .build(),
     );
 
-    let mut nodes = TestNetworkBuilder::<OptimismNode>::new(3, chain_spec, exec).build().await?;
+    // setup wallets and generator functions
+    let mut wallets = WalletGenerator::new().chain_id(BASE_MAINNET.chain).gen_many(2);
 
+    let wallet = wallets.pop().unwrap();
+    let generator_fn = move || {
+        let mut wallet = wallet.clone();
+        Box::pin(async move { wallet.optimism_block_info().await })
+    };
+
+    let second_wallet = wallets.pop().unwrap();
+    let generator_fn_2 = move || {
+        let mut wallet = second_wallet.clone();
+        Box::pin(async move { wallet.optimism_block_info().await })
+    };
+
+    // setup 3 nodes
+    let mut nodes = TestNetworkBuilder::<OptimismNode>::new(3, chain_spec, exec)
+        .set_tx_generator(generator_fn)
+        .build()
+        .await?;
     let third_node = nodes.pop().unwrap();
-    let mut second_node = nodes.pop().unwrap();
-    let first_node = nodes.pop().unwrap();
+    // override tx generator using a separate wallet
+    let mut second_node = nodes.pop().unwrap().set_tx_generator(Arc::new(generator_fn_2));
+    let mut first_node = nodes.pop().unwrap();
 
-    let mut first_node = first_node.with_wallets(chain_id, 1);
-    let wallet = first_node.wallets.pop().unwrap();
-    let wallet = Arc::new(Mutex::new(wallet));
-
+    // setup tip and reorg depth
     let tip: usize = 90;
     let tip_index: usize = tip - 1;
     let reorg_depth = 2;
 
     // On first node, create a chain up to block number 90a
-    let canonical_payload_chain = first_node
-        .advance_many(
-            tip as u64,
-            |_: u64| {
-                let wallet = wallet.clone();
-                Box::pin(async move {
-                    let mut wallet = wallet.lock().await;
-                    let raw_tx = wallet.optimism_block_info(wallet.nonce).await;
-                    wallet.nonce += 1;
-                    raw_tx
-                })
-            },
-            optimism_payload_attributes,
-        )
-        .await
-        .unwrap();
+    let canonical_payload_chain =
+        first_node.advance_many(tip as u64, optimism_payload_attributes).await.unwrap();
     let canonical_chain =
         canonical_payload_chain.iter().map(|p| p.0.block().hash()).collect::<Vec<_>>();
 
@@ -77,27 +76,10 @@ async fn can_sync() -> eyre::Result<()> {
     third_node.wait_until_block_is_available(tip as u64, canonical_chain[tip_index]).await?;
 
     //  On second node, create a side chain: 88a -> 89b -> 90b
-    wallet.lock().await.nonce -= reorg_depth as u64;
-    second_node.payload.timestamp = first_node.payload.timestamp - reorg_depth as u64; // TODO: probably want to make it node agnostic
-
-    let side_payload_chain = second_node
-        .advance_many(
-            reorg_depth as u64,
-            |_: u64| {
-                let wallet = wallet.clone();
-                Box::pin(async move {
-                    let mut wallet = wallet.lock().await;
-                    let raw_tx = wallet.optimism_block_info(wallet.nonce).await;
-                    wallet.nonce += 1;
-                    raw_tx
-                })
-            },
-            optimism_payload_attributes,
-        )
-        .await
-        .unwrap();
+    second_node.payload.timestamp = first_node.payload.timestamp - reorg_depth as u64;
+    let side_payload_chain =
+        second_node.advance_many(reorg_depth as u64, optimism_payload_attributes).await.unwrap();
     let side_chain = side_payload_chain.iter().map(|p| p.0.block().hash()).collect::<Vec<_>>();
-
     // Creates fork chain by submitting 89b payload.
     // By returning Valid here, op-node will finally return a finalized hash
     third_node
@@ -114,13 +96,8 @@ async fn can_sync() -> eyre::Result<()> {
     // It will issue a pipeline reorg to 88a, and then make 89b canonical AND finalized.
     third_node.engine_api.update_forkchoice(side_chain[0], side_chain[0]).await?;
 
-    let block = side_payload_chain[0].0.clone();
-    let number = block.block().number;
-    let n = (tip - reorg_depth) as u64;
-    info!("fcu to block: {:?} waiting unwind to: {:?}", number, n);
-
     // Make sure we have the updated block
-    third_node.wait_unwind(n).await?;
+    third_node.wait_unwind((tip - reorg_depth) as u64).await?;
     third_node
         .wait_until_block_is_available(
             side_payload_chain[0].0.block().number,

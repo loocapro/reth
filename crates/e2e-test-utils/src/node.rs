@@ -4,11 +4,12 @@ use crate::{
     payload::PayloadTestContext,
     rpc::RpcTestContext,
     traits::PayloadEnvelopeExt,
+    transaction::TransactionStream,
     wallet::{Wallet, WalletGenerator},
 };
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
-use futures_util::Future;
+use futures_util::{Future, StreamExt};
 use reth::{
     api::{BuiltPayload, EngineTypes, FullNodeComponents, PayloadBuilderAttributes},
     builder::FullNode,
@@ -16,9 +17,8 @@ use reth::{
     rpc::types::engine::PayloadStatusEnum,
 };
 use reth_node_builder::NodeTypes;
-use reth_primitives::{stage::StageId, BlockHash, BlockNumber, Bytes, ChainId, B256, MAINNET};
-use std::{marker::PhantomData, pin::Pin};
-use tokio_stream::StreamExt;
+use reth_primitives::{stage::StageId, BlockHash, BlockNumber, Bytes, B256, MAINNET};
+use std::{marker::PhantomData, sync::Arc};
 
 /// An helper struct to handle node actions
 pub struct NodeTestContext<Node>
@@ -30,7 +30,8 @@ where
     pub network: NetworkTestContext<Node>,
     pub engine_api: EngineApiTestContext<Node::Engine>,
     pub rpc: RpcTestContext<Node>,
-    pub wallets: Vec<Wallet>,
+    pub wallet: Wallet,
+    pub tx_stream: Option<TransactionStream>,
 }
 
 impl<Node> NodeTestContext<Node>
@@ -40,6 +41,16 @@ where
     /// Creates a new test node
     pub async fn new(node: FullNode<Node>) -> eyre::Result<NodeTestContext<Node>> {
         let builder = node.payload_builder.clone();
+
+        let wallet = WalletGenerator::new().chain_id(MAINNET.chain).gen();
+        let wall_clone = wallet.clone();
+
+        // default tx generator is eip1559
+        let generator_fn = move || {
+            let mut wallet = wallet.clone();
+            Box::pin(async move { wallet.eip1559().await })
+        };
+        let tx_stream = TransactionStream::new(generator_fn);
 
         Ok(Self {
             inner: node.clone(),
@@ -51,43 +62,34 @@ where
                 _marker: PhantomData::<Node::Engine>,
             },
             rpc: RpcTestContext { inner: node.rpc_registry },
-            wallets: WalletGenerator::new(2).chain_id(MAINNET.chain).gen(),
+            wallet: wall_clone,
+            tx_stream: Some(tx_stream),
         })
     }
 
-    /// Overrides the default wallets with a given amount of wallets and its chain id
-    pub fn with_wallets(mut self, chain_id: ChainId, amount: usize) -> Self {
-        self.wallets = WalletGenerator::new(amount).chain_id(chain_id).gen();
+    /// Overrides the default tx generator with a given tx generator
+    pub fn set_tx_generator<F, Fut>(mut self, tx_generator: Arc<F>) -> Self
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Bytes> + Send + 'static,
+    {
+        self.tx_stream = Some(TransactionStream::new(move || (tx_generator)()));
         self
     }
 
-    /// Advances the state of the node by generating and processing multiple transactions.
+    /// Inject the pending transactions from the tx stream into the node mempool
+    pub fn inject_pending_stream(&mut self) {
+        // Inject stream in the tx pool in background
+        let stream = self.tx_stream.take().expect("TransactionStream is not set");
+        self.rpc.inject_stream(stream);
+    }
+
+    /// Advances the chain `length` blocks.
     ///
-    /// This function generates a specified number of transactions using the provided `tx_generator`
-    /// and `attributes_generator` functions. Each transaction is then processed by the node,
-    /// advancing its state. The resulting payloads and their associated attributes are
-    /// collected into a vector and returned.
-    ///
-    /// # Arguments
-    ///
-    /// * `length` - The number of transactions to generate and process.
-    /// * `tx_generator` - A function that generates a new transaction. This function is called with
-    ///   an index and should return a `Future` that resolves to the raw bytes of the transaction.
-    /// * `attributes_generator` - A function that generates the attributes for a new payload. This
-    ///   function is called with an index and should return the attributes for the payload.
-    ///
-    /// # Returns
-    ///
-    /// This function returns a `Result` that, if `Ok`, contains a `Vec` of tuples. Each tuple
-    /// contains the payload resulting from processing a transaction and its associated attributes.
-    ///
-    /// # Errors
-    ///
-    /// This function returns an `Err` if there is an error advancing the state of the node.
+    /// Returns the added chain as a Vec of block hashes and the payload attributes used to build.
     pub async fn advance_many(
         &mut self,
         length: u64,
-        tx_generator: impl Fn(u64) -> Pin<Box<dyn Future<Output = Bytes> + Send>>,
         attributes_generator: impl Fn(u64) -> <Node::Engine as EngineTypes>::PayloadBuilderAttributes
             + Copy,
     ) -> eyre::Result<
@@ -101,9 +103,11 @@ where
             From<<Node::Engine as EngineTypes>::BuiltPayload> + PayloadEnvelopeExt,
     {
         let mut chain = Vec::with_capacity(length as usize);
-        for i in 0..length {
-            let raw_tx = tx_generator(i).await;
-            let (payload, attr, _) = self.advance(vec![], attributes_generator, raw_tx).await?;
+
+        self.inject_pending_stream();
+
+        for _ in 0..length {
+            let (payload, attr, _) = self.advance(vec![], attributes_generator).await?;
             chain.push((payload, attr));
         }
         Ok(chain)
@@ -114,7 +118,6 @@ where
         &mut self,
         versioned_hashes: Vec<B256>,
         attributes_generator: impl Fn(u64) -> <Node::Engine as EngineTypes>::PayloadBuilderAttributes,
-        raw_tx: Bytes,
     ) -> eyre::Result<(
         <Node::Engine as EngineTypes>::BuiltPayload,
         <Node::Engine as EngineTypes>::PayloadBuilderAttributes,
@@ -124,9 +127,6 @@ where
         <Node::Engine as EngineTypes>::ExecutionPayloadV3:
             From<<Node::Engine as EngineTypes>::BuiltPayload> + PayloadEnvelopeExt,
     {
-        // inject tx to the pool
-        let tx_hash = self.rpc.inject_tx(raw_tx).await?;
-
         let (payload, eth_attr) = self.new_payload(attributes_generator).await?;
 
         let block_hash = self
@@ -145,9 +145,9 @@ where
         // assert the block has been committed to the blockchain
         let block_hash = payload.block().hash();
         let block_number = payload.block().number;
-        self.assert_new_block(tx_hash, block_hash, block_number).await?;
+        self.assert_new_block(block_hash, block_number).await?;
 
-        Ok((payload, eth_attr, tx_hash))
+        Ok((payload, eth_attr, block_hash))
     }
 
     /// Creates a new payload from given attributes generator
@@ -223,22 +223,19 @@ where
         Ok(())
     }
 
-    /// Asserts that a new block has been added to the blockchain
-    /// and the tx has been included in the block.
-    ///
-    /// Does NOT work for pipeline since there's no stream notification!
-    pub async fn assert_new_block(
-        &mut self,
-        tip_tx_hash: B256,
-        block_hash: B256,
-        block_number: BlockNumber,
-    ) -> eyre::Result<()> {
+    pub async fn assery_tx_hash(&mut self, tip_tx_hash: B256) {
         // get head block from notifications stream and verify the tx has been pushed to the
         // pool is actually present in the canonical block
         let head = self.engine_api.canonical_stream.next().await.unwrap();
         let tx = head.tip().transactions().next();
         assert_eq!(tx.unwrap().hash().as_slice(), tip_tx_hash.as_slice());
+    }
 
+    pub async fn assert_new_block(
+        &self,
+        block_hash: B256,
+        block_number: BlockNumber,
+    ) -> eyre::Result<()> {
         loop {
             // wait for the block to commit
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;

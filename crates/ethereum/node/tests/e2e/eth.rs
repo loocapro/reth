@@ -26,11 +26,9 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     );
 
     let mut node = TestNodeGenerator::<EthereumNode>::new(chain_spec, exec).gen().await?;
-
-    let raw_tx = node.wallets.first().unwrap().eip1559().await;
-
+    node.inject_pending_stream();
     // make the node advance
-    node.advance(vec![], eth_payload_attributes, raw_tx).await?;
+    node.advance(vec![], eth_payload_attributes).await?;
 
     Ok(())
 }
@@ -64,10 +62,10 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
         .await?;
     let mut node = NodeTestContext::new(node).await?;
 
-    let raw_tx = node.wallets.first().unwrap().eip1559().await;
+    node.inject_pending_stream();
 
     // make the node advance
-    node.advance(vec![], eth_payload_attributes, raw_tx).await?;
+    node.advance(vec![], eth_payload_attributes).await?;
 
     Ok(())
 }

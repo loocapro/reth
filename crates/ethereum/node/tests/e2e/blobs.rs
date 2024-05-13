@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use reth::{rpc::types::engine::PayloadStatusEnum, tasks::TaskManager};
-use reth_e2e_test_utils::{transaction::TransactionTestContext, TestNodeGenerator};
+use reth_e2e_test_utils::{
+    transaction::TransactionTestContext, wallet::WalletGenerator, TestNodeGenerator,
+};
 
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{b256, ChainSpecBuilder, Genesis, MAINNET};
@@ -24,10 +26,13 @@ async fn can_restore_blob_tx_on_reorg() -> eyre::Result<()> {
             .build(),
     );
 
+    // setup node
     let mut node = TestNodeGenerator::<EthereumNode>::new(chain_spec, exec).gen().await?;
 
-    let blob_wallet = node.wallets.pop().unwrap();
-    let second_wallet = node.wallets.pop().unwrap();
+    // setup 2 different wallets
+    let mut wallets = WalletGenerator::new().chain_id(MAINNET.chain).gen_many(2);
+    let mut blob_wallet = wallets.pop().unwrap();
+    let mut second_wallet = wallets.pop().unwrap();
 
     // inject normal tx
     let raw_tx = second_wallet.eip1559().await;
