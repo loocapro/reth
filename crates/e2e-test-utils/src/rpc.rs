@@ -1,3 +1,4 @@
+use crate::transaction::TransactionStream;
 use alloy_consensus::TxEnvelope;
 use alloy_network::eip2718::Decodable2718;
 use futures_util::StreamExt;
@@ -6,7 +7,6 @@ use reth_primitives::{Bytes, B256};
 use reth_rpc::eth::{error::EthResult, EthTransactions};
 use tracing::error;
 
-use crate::transaction::TransactionStream;
 pub struct RpcTestContext<Node: FullNodeComponents> {
     pub inner: RpcRegistry<Node>,
 }
