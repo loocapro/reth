@@ -132,7 +132,7 @@ where
             // Check if there's a sleep future active and attempt to poll it.
             if let Some(sleep) = this.sleep.as_mut() {
                 // If the sleep is not ready, return `Poll::Pending`.
-                let _ = ready!(sleep.as_mut().poll(cx));
+                ready!(sleep.as_mut().poll(cx));
                 // If the sleep completes, clear the future to allow next actions to proceed.
                 this.sleep = None;
             }
