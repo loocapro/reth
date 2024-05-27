@@ -61,9 +61,29 @@ where
         self
     }
 
-    /// Advances the chain `length` blocks.
+    /// Advances the state of the node by generating and processing multiple transactions.
     ///
-    /// Returns the added chain as a Vec of block hashes and the payload attributes used to build.
+    /// This function generates a specified number of transactions using the provided `tx_generator`
+    /// and `attributes_generator` functions. Each transaction is then processed by the node,
+    /// advancing its state. The resulting payloads and their associated attributes are
+    /// collected into a vector and returned.
+    ///
+    /// # Arguments
+    ///
+    /// * `length` - The number of transactions to generate and process.
+    /// * `tx_generator` - A function that generates a new transaction. This function is called with
+    ///   an index and should return a `Future` that resolves to the raw bytes of the transaction.
+    /// * `attributes_generator` - A function that generates the attributes for a new payload. This
+    ///   function is called with an index and should return the attributes for the payload.
+    ///
+    /// # Returns
+    ///
+    /// This function returns a `Result` that, if `Ok`, contains a `Vec` of tuples. Each tuple
+    /// contains the payload resulting from processing a transaction and its associated attributes.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an `Err` if there is an error advancing the state of the node.
     pub async fn advance_many(
         &mut self,
         length: u64,

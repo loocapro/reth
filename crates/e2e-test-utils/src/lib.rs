@@ -43,13 +43,19 @@ pub mod runner;
 /// The nodes are interconnected in a chain.
 pub struct TestNetworkBuilder<N: Default + reth_node_builder::Node<TmpNodeAdapter<N>>>
 where
-    N: Default + Node<TmpNodeAdapter<N>>,
+    N: Node<TmpNodeAdapter<N>>,
 {
+    /// `Network` is a vector that holds the context of each node in the network.
+    /// Each `NodeTestCtx` in the vector represents a node in the network.
     network: Vec<NodeTestCtx<N>>,
+
+    /// `Node_generator` is an instance of `TestNodeGenerator` that is used to generate new nodes.
+    /// It is initialized with a chain specification and an executor, and can be used to generate
+    /// nodes for the network.
     node_generator: TestNodeGenerator<N>,
 }
 
-impl<N: Default + reth_node_builder::Node<TmpNodeAdapter<N>>> TestNetworkBuilder<N>
+impl<N> TestNetworkBuilder<N>
 where
     N: Default + Node<TmpNodeAdapter<N>>,
 {

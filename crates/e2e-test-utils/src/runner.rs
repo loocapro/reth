@@ -5,7 +5,7 @@ use std::{
     collections::VecDeque,
     future::Future,
     pin::Pin,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
     time::Duration,
 };
 use tokio::time::{sleep_until, Instant, Sleep};
@@ -131,27 +131,21 @@ where
         loop {
             // Check if there's a sleep future active and attempt to poll it.
             if let Some(sleep) = this.sleep.as_mut() {
-                if sleep.as_mut().poll(cx).is_ready() {
-                    // If the sleep completes, clear the future to allow next actions to proceed.
-                    this.sleep = None;
-                } else {
-                    // If the sleep has not completed, return `Poll::Pending`.
-                    return Poll::Pending;
-                }
+                // If the sleep is not ready, return `Poll::Pending`.
+                let _ = ready!(sleep.as_mut().poll(cx));
+                // If the sleep completes, clear the future to allow next actions to proceed.
+                this.sleep = None;
             }
 
             // Check if there's a future active and attempt to poll it.
             if let Some(future) = this.future.as_mut() {
-                if let Poll::Ready(mut res) = future.as_mut().poll(cx) {
-                    // If the future completes, capture the context from the result and clear the
-                    // future.
-                    this.future = None;
-                    let ctx = res.0.take(); // Take the context out of the result.
-                    this.ctx = ctx; // Store the context back to the stream for future actions.
-                } else {
-                    // If the future is not ready, return `Poll::Pending`.
-                    return Poll::Pending;
-                }
+                // If the future is not ready, return `Poll::Pending`.
+                let mut res = ready!(future.as_mut().poll(cx));
+                // If the future completes, capture the context from the result and clear the
+                // future.
+                this.future = None;
+                let ctx = res.0.take(); // Take the context out of the result.
+                this.ctx = ctx; // Store the context back to the stream for future actions.
             }
 
             // Only proceed to fetch and prepare the next action if there is no active future or
