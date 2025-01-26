@@ -18,7 +18,6 @@ use reth_node_core::{
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_payload_builder::PayloadStore;
-use reth_primitives::EthPrimitives;
 use reth_rpc::{
     eth::{EthApiTypes, FullEthApiServer},
     EthApi,
@@ -574,7 +573,7 @@ pub trait EthApiBuilder<N: FullNodeComponents>: 'static {
     fn build(ctx: &EthApiBuilderCtx<N>) -> Self;
 }
 
-impl<N: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> EthApiBuilder<N>
+impl<N: FullNodeComponents<Types: NodeTypes>> EthApiBuilder<N>
     for EthApi<N::Provider, N::Pool, N::Network, N::Evm>
 {
     fn build(ctx: &EthApiBuilderCtx<N>) -> Self {

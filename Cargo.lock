@@ -2996,6 +2996,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-custom-header-node"
+version = "0.0.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-genesis",
+ "alloy-primitives",
+ "alloy-rpc-types",
+ "alloy-sol-macro",
+ "alloy-sol-types",
+ "eyre",
+ "reth",
+ "reth-basic-payload-builder",
+ "reth-chain-state",
+ "reth-chainspec",
+ "reth-engine-local",
+ "reth-ethereum-payload-builder",
+ "reth-evm",
+ "reth-node-api",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-payload-builder",
+ "reth-tracing",
+ "reth-transaction-pool",
+ "reth-trie-db",
+ "serde",
+ "thiserror 2.0.11",
+ "tokio",
+]
+
+[[package]]
 name = "example-custom-inspector"
 version = "0.0.0"
 dependencies = [
