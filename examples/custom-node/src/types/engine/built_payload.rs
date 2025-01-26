@@ -18,7 +18,13 @@ use reth_payload_builder::EthBuiltPayload;
 use crate::types::primitives::CustomPrimitives;
 
 #[derive(Debug, Clone)]
-pub struct CustomBuiltPayload(pub(crate) EthBuiltPayload);
+pub struct CustomBuiltPayload(EthBuiltPayload);
+
+impl CustomBuiltPayload {
+    pub fn new(payload: EthBuiltPayload) -> Self {
+        Self(payload)
+    }
+}
 
 impl AsRef<EthBuiltPayload> for CustomBuiltPayload {
     fn as_ref(&self) -> &EthBuiltPayload {

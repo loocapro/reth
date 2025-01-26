@@ -113,6 +113,6 @@ where
                 PayloadConfig { parent_header, attributes },
             )?;
 
-        Ok(CustomBuiltPayload(empty_payload))
+        Ok(CustomBuiltPayload::new(empty_payload))
     }
 }

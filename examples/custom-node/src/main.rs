@@ -15,7 +15,6 @@ async fn main() -> eyre::Result<()> {
 
     let tasks = TaskManager::current();
 
-    // create optimism genesis with canyon at block 2
     let spec = ChainSpec::builder()
         .chain(Chain::mainnet())
         .genesis(Genesis::default())
